@@ -1,0 +1,23 @@
+{
+  "outbound_gateway_mac": "@BR0_MAC@",
+  "outbound_src_ip": "192.168.100.20",
+  "forward_icmp_ping_responses": true,
+  "num_worker_queues": 1,
+  "rx_drop_en": false,
+  "flow_paths": [
+    { "rx_port": 0, "rx_queue": 0, "tx_port": 0, "tx_queue": 0 }
+  ],
+  "lcores": {
+    "lcore-1": {
+      "rx": true,
+      "tx": true,
+      "flow_paths": [0],
+      "dist": true,
+      "num_dist_workers": 1
+    },
+    "lcore-2": {
+      "work": true,
+      "work_source": 1
+    }
+  }
+}
