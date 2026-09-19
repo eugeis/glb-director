@@ -1,0 +1,167 @@
+{
+  "title": "GLB Director - datapath & failover",
+  "uid": "glb-director-lab",
+  "tags": ["glb", "lab", "dpdk"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Port packets/s (RX vs TX)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(glb_director_port_packets_rx_total[1m]))", "legendFormat": "RX" },
+        { "refId": "B", "expr": "sum(rate(glb_director_port_packets_tx_total[1m]))", "legendFormat": "TX" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Port throughput (MB/s)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "Mbytes" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(glb_director_port_bytes_rx_total[1m]))", "legendFormat": "RX" },
+        { "refId": "B", "expr": "sum(rate(glb_director_port_bytes_tx_total[1m]))", "legendFormat": "TX" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Encapsulations /s (success vs failure)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(glb_director_core_packets_encap_success_total[1m]))", "legendFormat": "success" },
+        { "refId": "B", "expr": "sum(rate(glb_director_core_packets_encap_failure_total[1m]))", "legendFormat": "failure" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Classification /s (matched vs unmatched)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(glb_director_core_packets_matched_total[1m]))", "legendFormat": "matched" },
+        { "refId": "B", "expr": "sum(rate(glb_director_core_packets_unmatched_total[1m]))", "legendFormat": "unmatched" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Classification success %",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0, "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 95 },
+            { "color": "green", "value": 99 }
+          ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "area" },
+      "targets": [
+        { "refId": "A", "expr": "100 * sum(rate(glb_director_core_packets_matched_total[5m])) / (sum(rate(glb_director_core_packets_matched_total[5m])) + sum(rate(glb_director_core_packets_unmatched_total[5m])))" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Encap success %",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0, "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 99 },
+            { "color": "green", "value": 100 }
+          ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "area" },
+      "targets": [
+        { "refId": "A", "expr": "100 * sum(rate(glb_director_core_packets_encap_success_total[5m])) / (sum(rate(glb_director_core_packets_encap_success_total[5m])) + sum(rate(glb_director_core_packets_encap_failure_total[5m])))" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Table reloads (drain/failover events, total)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "blue", "value": null }, { "color": "green", "value": 1 } ] } },
+        "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "expr": "sum(glb_director_core_config_reload_total)" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Encap failures (last 5m)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } },
+        "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(glb_director_core_packets_encap_failure_total[5m]))" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Unmatched packets (last 5m)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } },
+        "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(glb_director_core_packets_unmatched_total[5m]))" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Port RX problems /s (errors / no-mbuf / missed)",
+      "datasource": { "type": "prometheus", "uid": "glb-prom" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(glb_director_port_packets_rx_errors_total[1m]))", "legendFormat": "rx_errors" },
+        { "refId": "B", "expr": "sum(rate(glb_director_port_packets_rx_nombuf_total[1m]))", "legendFormat": "rx_nombuf" },
+        { "refId": "C", "expr": "sum(rate(glb_director_port_packets_rx_missed_total[1m]))", "legendFormat": "rx_missed" }
+      ]
+    }
+  ]
+}

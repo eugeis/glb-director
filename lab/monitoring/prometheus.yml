@@ -1,0 +1,29 @@
+# Prometheus config for the GLB lab. Scrapes the statsd-exporter (which bridges
+# the director's UDP statsd into Prometheus metrics). Short interval so the lab
+# dashboard feels live.
+#
+# Run:  prometheus --config.file=prometheus.yml --storage.tsdb.path=./prom-data
+#       (the launcher script does this for you)
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "glb-director"          # statsd-exporter -> director datapath metrics
+    static_configs:
+      - targets: ["127.0.0.1:9102"]
+        labels:
+          component: "glb-director"
+
+  - job_name: "prometheus"            # Prometheus self-metrics (optional)
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+
+# Optional: alert rules go here. A useful one for this lab:
+#   - alert: GLBDirectorEncapFailures
+#     expr: rate(glb_director_core_packets_encap_failure_total[2m]) > 0
+#     for: 1m
+#     labels: {severity: warning}
+#     annotations:
+#       summary: "glb-director is failing encapsulations"

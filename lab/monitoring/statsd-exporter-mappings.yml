@@ -1,0 +1,94 @@
+# statsd-exporter mapping for the glb-director statsd metrics.
+#
+# The director (built with -DSTATSD) emits UDP statsd to 127.0.0.1:<statsd_port>
+# (default 28125; the smoke test uses 8125) with namespace "glb_director_ng".
+# The full statsd line looks like:
+#   glb_director_ng.port.packets.rx:123|c|#port:00
+#   glb_director_ng.core.packets.encap.success:7|c|#core:02
+#
+# statsd-exporter matches on the full metric name (the part before the first ':'),
+# and converts statsd tags (e.g. #port:00, #core:01) into Prometheus labels
+# automatically. Every metric here is a statsd *count* ("c") carrying a per-interval
+# delta, so we expose each as a monotonic Prometheus counter and use rate() in
+# Grafana/PromQL.
+#
+# Reload at runtime:  kill -HUP <statsd-exporter-pid>   (or lifecycle API)
+
+# No `defaults:` block: statsd "c" (counter) lines are exposed as monotonic
+# Prometheus counters by default, which is what `rate()`/`increase()` need.
+
+mappings:
+  # ---- per-PORT (DPDK eth port) deltas --------------------------------------
+  - match: "glb_director_ng.port.packets.rx"
+    name: "glb_director_port_packets_rx_total"
+    help: "RX packets on the DPDK port"
+  - match: "glb_director_ng.port.packets.tx"
+    name: "glb_director_port_packets_tx_total"
+    help: "TX packets on the DPDK port"
+  - match: "glb_director_ng.port.bytes.rx"
+    name: "glb_director_port_bytes_rx_total"
+    help: "RX bytes on the DPDK port"
+  - match: "glb_director_ng.port.bytes.tx"
+    name: "glb_director_port_bytes_tx_total"
+    help: "TX bytes on the DPDK port"
+  - match: "glb_director_ng.port.packets.rx_missed"
+    name: "glb_director_port_packets_rx_missed_total"
+    help: "RX missed packets (NIC ring overflow) on the DPDK port"
+  - match: "glb_director_ng.port.packets.rx_errors"
+    name: "glb_director_port_packets_rx_errors_total"
+    help: "RX errors on the DPDK port"
+  - match: "glb_director_ng.port.packets.tx_errors"
+    name: "glb_director_port_packets_tx_errors_total"
+    help: "TX errors on the DPDK port"
+  - match: "glb_director_ng.port.packets.rx_nombuf"
+    name: "glb_director_port_packets_rx_nombuf_total"
+    help: "RX no-mbuf drops (mbuf pool exhausted) on the DPDK port"
+
+  # ---- per-QUEUE deltas ------------------------------------------------------
+  - match: "glb_director_ng.queue.packets.rx"
+    name: "glb_director_queue_packets_rx_total"
+    help: "RX packets on the DPDK queue"
+  - match: "glb_director_ng.queue.packets.rx_errors"
+    name: "glb_director_queue_packets_rx_errors_total"
+    help: "RX errors on the DPDK queue"
+  - match: "glb_director_ng.queue.bytes.rx"
+    name: "glb_director_queue_bytes_rx_total"
+    help: "RX bytes on the DPDK queue"
+  - match: "glb_director_ng.queue.packets.tx"
+    name: "glb_director_queue_packets_tx_total"
+    help: "TX packets on the DPDK queue"
+  - match: "glb_director_ng.queue.bytes.tx"
+    name: "glb_director_queue_bytes_tx_total"
+    help: "TX bytes on the DPDK queue"
+
+  # ---- per-CORE datapath counters (reset each interval) ----------------------
+  - match: "glb_director_ng.core.packets.total"
+    name: "glb_director_core_packets_total"
+    help: "Total packets processed on the lcore"
+  - match: "glb_director_ng.core.packets.matched"
+    name: "glb_director_core_packets_matched_total"
+    help: "Packets that matched a forwarding-table flow (classified OK)"
+  - match: "glb_director_ng.core.packets.unmatched"
+    name: "glb_director_core_packets_unmatched_total"
+    help: "Classification failures (no matching flow / not handled)"
+  - match: "glb_director_ng.core.packets.rx_errors"
+    name: "glb_director_core_packets_rx_errors_total"
+    help: "RX errors observed on the lcore"
+  - match: "glb_director_ng.core.packets.kni"
+    name: "glb_director_core_packets_kni_total"
+    help: "Packets handed to KNI (kernel) on the lcore"
+  - match: "glb_director_ng.core.packets.encap.success"
+    name: "glb_director_core_packets_encap_success_total"
+    help: "Successful GLB-GUE encapsulations on the lcore"
+  - match: "glb_director_ng.core.packets.encap.failure"
+    name: "glb_director_core_packets_encap_failure_total"
+    help: "Failed GLB-GUE encapsulations on the lcore"
+  - match: "glb_director_ng.core.packets.eth_tx_sent"
+    name: "glb_director_core_packets_eth_tx_sent_total"
+    help: "Encapsulated packets TXed via the eth port on the lcore"
+  - match: "glb_director_ng.core.packets.kni_tx_sent"
+    name: "glb_director_core_packets_kni_tx_sent_total"
+    help: "Encapsulated packets TXed via KNI on the lcore"
+  - match: "glb_director_ng.core.config_reload_count"
+    name: "glb_director_core_config_reload_total"
+    help: "Forwarding-table reloads (SIGUSR1) on the lcore - rises on each drain/failover"

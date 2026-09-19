@@ -18,6 +18,31 @@ against live proxy servers; the smoke test is the minimal, deterministic core.
 
 ---
 
+## 0. Deep-dive concept guides & live monitoring (start here)
+
+This file is the **tour** of what was built and verified. To **learn the concepts
+deeply** — the networking, load-balancing, encapsulation, DPDK, and proxy-side
+mechanics, each explained from first principles for a **Go/Rust / architecture**
+background and linked to the actual source — use the companion guides:
+
+- **Concepts** (index: [`concepts/README.md`](./concepts/README.md)), in order:
+  1. [Networking fundamentals](./concepts/01-networking-fundamentals.md) — layers, IP/MAC, ports, CIDR, the 5-tuple flow key, endianness
+  2. [Linux virtual networking](./concepts/02-linux-virtual-networking.md) — netns / veth / bridge, the real lab topology, DSR
+  3. [Load balancing](./concepts/03-load-balancing.md) — stickiness, rendezvous hashing, primary+secondary, draining, anycast
+  4. [Encapsulation & GUE](./concepts/04-encapsulation-and-gue.md) — tunneling, the GLB-GUE byte layout, the encap code path
+  5. [DPDK](./concepts/05-dpdk.md) — EAL / hugepages / PMD / lcores / mbuf / KNI / pcap vdev
+  6. [The proxy second-chance](./concepts/06-kernel-redirect.md) — netfilter/iptables, `GLBREDIRECT`, the proxy decision
+  7. [Observability](./concepts/07-observability.md) — metrics / packet capture / failover + the monitoring how-to
+- **Monitoring / visualization** — a **Prometheus + Grafana** stack (installed
+  locally, nothing system-wide), a traffic generator, and a drain trigger to **watch
+  a failover live** on a dashboard: [`monitoring/`](./monitoring/) — see
+  [07-observability](./concepts/07-observability.md) for install, setup, and how to use it.
+
+The sections below (§1–§10) are the **condensed** notes; the `concepts/` guides are
+the expanded, from-first-principles versions with source links.
+
+---
+
 ## 1. What glb-director is
 
 `glb-director` is the data-plane "director" of a Global Load Balancer (GLB). It
@@ -216,6 +241,10 @@ Net effect for a 2-backend table when the flow's **primary** is drained:
 The packet's `sport` is **unchanged** (the hash is deterministic and independent
 of backend state) — only the destination and hop list move.
 
+> **Deep dive:** [03-load-balancing](./concepts/03-load-balancing.md) explains *why*
+> the table is a precomputed rendezvous ranking, the primary/secondary "second
+> chance", the drain state machine, and anycast.
+
 ---
 
 ## 5. GLB-GUE wire format (byte-verified)
@@ -268,6 +297,10 @@ UDP sport      = 61139
 The smoke test asserts the full 14-field layout (outer MAC/IP, both UDP ports,
 GUE protocol/hop_count/next_hop/hops, and every inner field) and it **passes** in
 both phases.
+
+> **Deep dive:** [04-encapsulation-and-gue](./concepts/04-encapsulation-and-gue.md) —
+> why GUE-over-UDP, the UDP-sport-as-hash for ECMP/RSS spreading, and the encap
+> code path line by line.
 
 ---
 
@@ -391,6 +424,10 @@ Artifacts are left in `/tmp/glb-smoke/` for inspection: `tx_dump.pcap`
 uses the `live_director` fallback build (`build.sh`, `PCAP_MODE`) when the DPDK
 binary isn't available; the smoke test above is the authoritative, passing
 verification of the real binary.
+
+> **Watch it run:** [07-observability](./concepts/07-observability.md) +
+> [`monitoring/`](./monitoring/) — a local Prometheus + Grafana stack, a live
+> traffic generator, and a drain trigger to see a **failover on a dashboard**.
 
 ---
 
