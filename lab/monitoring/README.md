@@ -44,6 +44,20 @@ sudo ~/dev/glb-lab-venv/bin/python lab/monitoring/generate_traffic.py \
 Step 2 prints the exact step-3 line (with the right MACs) once the datapath is up.
 Then open **http://localhost:3002** → dashboard **"GLB Director - datapath & failover"**.
 
+### Traffic options & how much you can push
+
+- **`--flags`** — `S` (default) = SYN (new-flow); **`A` = ACK (established)**. Use
+  `--flags A` so a drain re-routes an *existing* connection, not just new SYNs.
+- **`--sources 10.11.12.14,10.11.12.15,…`** — more distinct flows; each 5-tuple hashes
+  to backend `.20` or `.21`. Watch the split in the pcap (`monitor_tx.pcap`), not a
+  single metric (`matched` is *bind-level*: does the flow hit a VIP we serve).
+- **How much:** the *director* is real DPDK and **loses nothing** here (0 `rx_missed` /
+  `rx_nombuf` at every tested rate) — it is *not* the bottleneck. The **scapy generator
+  is**: it's capped at **~300 pps** in this setup (Python 20-packet batch loop +
+  `sendp` overhead). Measured achieved RX: req 500→181, 2000→308, 5000→332 pps. To
+  stress the datapath higher, use a faster sender (bigger batches / `sendpfast` / a
+  raw-socket C sender / `trafgen`) rather than a higher `--rate` on this script.
+
 ## Watch a failover
 
 With the director + traffic running, drain the flow's primary backend and reload:

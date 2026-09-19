@@ -14,6 +14,12 @@ Usage (run from the lab, with the director already up in dumper mode on glbt_dpd
       --iface glbt_py --dst-mac <dpdk_mac> --src-mac <py_mac> \
       --src 10.11.12.13 --dst 10.0.0.1 --sport 45678 --dport 80 \
       --rate 200 --duration 600
+
+Traffic type (--flags):
+  S  (default)  new-flow SYNs   -> exercises the slow path (first pkt -> KNI -> learned)
+  A             established ACKs-> exercises the fast path; pair with trigger_drain.sh to
+                      watch an *existing* connection re-route to the secondary backend
+  SA            SYN+ACK         e.g. server side of a handshake
 """
 
 import argparse
@@ -32,6 +38,10 @@ def main() -> None:
     ap.add_argument("--sport", type=int, default=45678, help="inner TCP source port")
     ap.add_argument("--dport", type=int, default=80, help="inner TCP destination port")
     ap.add_argument("--payload", default="glb-monitor", help="inner TCP payload")
+    ap.add_argument("--flags", default="S",
+                    help="TCP flags: S=SYN (new flow, default), A=ACK (established), SA=synack")
+    ap.add_argument("--seq", type=int, default=1000, help="TCP seq (for A/SA realism)")
+    ap.add_argument("--acknum", type=int, default=1001, help="TCP ack number (for A/SA realism)")
     ap.add_argument("--rate", type=int, default=200, help="packets/second to send")
     ap.add_argument("--duration", type=float, default=600.0, help="seconds to run (0 = until Ctrl-C)")
     ap.add_argument("--sources", default="", help="comma-sep extra source IPs to rotate (more flows)")
@@ -69,7 +79,8 @@ def main() -> None:
                 i += 1
                 pkt = (Ether(dst=args.dst_mac, src=args.src_mac)
                        / IP(src=src, dst=args.dst)
-                       / TCP(sport=args.sport, dport=args.dport, flags="S")
+                       / TCP(sport=args.sport, dport=args.dport, flags=args.flags,
+                             seq=args.seq, ack=args.acknum)
                        / args.payload.encode())
                 batch.append(pkt)
             sendp(batch, iface=args.iface, inter=inter, verbose=False)
