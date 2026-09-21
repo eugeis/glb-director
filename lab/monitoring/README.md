@@ -60,6 +60,49 @@ Then open **http://localhost:3002** → dashboard **"GLB Director - datapath & f
    real datapath ceiling (fast C sender) is measured in
    [Throughput: measured ceiling](#throughput-measured-ceiling--what-to-understand) below.
 
+## Dashboards
+
+Two dashboards (both auto-imported by `start_monitoring.sh`; to add one by hand:
+`POST /api/dashboards/db` with `{"dashboard":<json>,"overwrite":true}`, `-u admin:admin`):
+
+- **GLB Director – datapath & failover** (`uid glb-director-lab`,
+  [`grafana-dashboard-glb-director.json`](grafana-dashboard-glb-director.json)) — the
+  **live / continuous** view. Uses `rate[1m]`/`[5m]`, so it assumes *steady* traffic.
+  Use it while a sustained load or a drain/failover drill is running (**time range
+  Last 15 min**, refresh **5s**). The stat tiles (classification/encap success %,
+  unmatched, encap failures, table reloads) are the at-a-glance health.
+
+- **GLB Director – throughput & pipeline (burst analysis)**
+  (`uid glb-director-throughput`,
+  [`grafana-dashboard-glb-director-throughput.json`](grafana-dashboard-glb-director-throughput.json))
+  — for **analysing short high-rate bursts** (the `blast` tests). It uses `rate[15s]`
+  — the `1m` window on the other dashboard smears a 15s burst down to ~25% of its true
+  peak (257k instead of 1.54M pps). Workflow:
+  1. Set the time range onto **one burst** (recorded windows in the table below).
+  2. Read the **top stat row** — Peak RX / Peak encap (pps) and Total RX / Total
+     encapped / Dropped→KNI / RX ring-loss (pkts) all recompute over your selection.
+     **`TotalRX == TotalEncapped` and `KNI == 0` is the lossless signature.**
+  3. The **pipeline panel** (RX / matched / encap / TX / KNI on one axis) shows the
+     0-loss overlap; where **KNI spikes** = unclassified (e.g. the SOCK_RAW e2e test).
+  4. The **per-core** panels show the 3-lcore split (core01 RX+distribute+TX, core02
+     classify+encap). Refresh can be **off** while you read.
+
+### Recorded test windows (this lab's Prometheus still holds them)
+
+| window (VM local time) | what | expect |
+|---|---|---|
+| 08:10:00–08:10:30 | local 1-core `blast` | ~790k pps, 0 loss |
+| 08:11:20–08:11:40 | local 12-core `blast` | ~1.09M pps, 0 loss |
+| 08:14:20–08:14:40 | **local 4-core peak (ceiling)** | ~1.54M pps, 0 loss |
+| 08:29–08:37 | cross-host **SOCK_RAW** (IP-in-IP wrapped) | arrives but **KNI>0**, ~0 matched |
+| 08:41:50–08:42:10 | cross-host AF_PACKET 1-core | ~102k pps, 0 loss |
+| 08:43:30–08:43:50 | cross-host AF_PACKET 4-core | ~272k pps, 0 loss |
+| 08:44:20–08:44:45 | cross-host AF_PACKET 8-core | ~274k pps (406x virtio TX ceiling), 0 loss |
+
+> Times are the VM local clock. If retention has expired or the stack was restarted,
+> older windows may be gone — re-run the `blast` tests (commands in the Throughput
+> section) to regenerate.
+
 ## Throughput: measured ceiling & what to understand
 
 The scapy sender caps at ~300 pps, so it can't stress the datapath. A fast `AF_PACKET`
