@@ -55,8 +55,83 @@ Then open **http://localhost:3002** → dashboard **"GLB Director - datapath & f
   `rx_nombuf` at every tested rate) — it is *not* the bottleneck. The **scapy generator
   is**: it's capped at **~300 pps** in this setup (Python 20-packet batch loop +
   `sendp` overhead). Measured achieved RX: req 500→181, 2000→308, 5000→332 pps. To
-  stress the datapath higher, use a faster sender (bigger batches / `sendpfast` / a
-  raw-socket C sender / `trafgen`) rather than a higher `--rate` on this script.
+   stress the datapath higher, use a faster sender (bigger batches / `sendpfast` / a
+   raw-socket C sender / `trafgen`) rather than a higher `--rate` on this script. The
+   real datapath ceiling (fast C sender) is measured in
+   [Throughput: measured ceiling](#throughput-measured-ceiling--what-to-understand) below.
+
+## Throughput: measured ceiling & what to understand
+
+The scapy sender caps at ~300 pps, so it can't stress the datapath. A fast raw-socket
+C sender does. Two are in [`blast/`](blast/):
+
+- **`blast.c`** — `AF_PACKET` on the veth peer `glbt_py`; feeds the director's
+  `glbt_dpdk` RX directly and **isolates the director** from any transport.
+  `gcc -O2 -o blast blast.c && sudo ./blast glbt_py <secs> <cpu>`.
+- **`blast_route.c`** — `SOCK_RAW` to `10.0.0.1:80`; runs on a **second host** and
+  pushes over the real network (needs a `10.0.0.1/32 via <director-host>` route on the
+  client). Used for the cross-host end-to-end test.
+
+### Measured (director in pcap-dumper mode, 100-byte TCP packets)
+
+| feed (sender cores) | feed rate   | director RX | matched=encap=TX (pcap) | loss |
+|---------------------|-------------|-------------|-------------------------|------|
+| 1 core              | 790k pps    | 791k        | 791k                    | 0%   |
+| 4 cores (feed peak) | 1.61M pps   | **1.54M**   | 1.54M                   | 4% (kernel socket) |
+| 12 cores            | 1.09M pps   | 1.09M       | 1.09M                   | 0.3% |
+
+**End-to-end datapath ceiling ≈ 1.54M pps (~1.16 Gbps @ 100B)**, with **zero loss in
+classify/encap/TX** (`matched == encap == pcap-records`, exact).
+
+### What matters (the non-obvious parts)
+
+**1. The datapath is a 3-lcore pipeline, not one loop.**
+- **core 0** = `main_loop_control`: control plane + statsd (sleeps 1s, flushes metrics
+  every ~10s).
+- **core 1** = `processor_rx_dist_tx` (workloads RX|DIST|TX): pulls from the NIC,
+  **distributes** bursts to the workers via a DPDK `rte_distributor`, then **TX**es the
+  returned bursts.
+- **core 2** = `processor_worker` (workloads WORK): `rte_distributor_get_pkt` →
+  **classify** (`rte_acl`) → **encap** (GLB-GUE) → returns the burst.
+
+Flow: `core1 RX → (distributor) → core2 classify+encap → (returned) → core1 TX`. The
+counters are per-core for this reason — RX on `core01`, matched/encap on `core02`, TX
+on `core01`. If core 2 ever stops draining, the distributor queue fills and core 1 keeps
+RX'ing (counting) but can't forward — so **always cross-check RX vs matched**, not just RX.
+
+**2. The bottleneck is the RX lcore reading the *kernel-capture* veth — a lab artifact,
+not the datapath's real limit.** Here the "NIC" is the `eth_pcap0` vdev
+(`rx_iface=glbt_dpdk`), which reads from a **kernel AF_PACKET socket on the veth**, not a
+NIC-bound DPDK PMD. core 1 pulling from that kernel socket tops out at ~1.54M pps; feed
+it more and the *kernel socket* drops the excess (the 4% at 1.61M; `rx_missed` stays 0
+because it's dropped at the socket, not a NIC ring). The classify+encap logic is far
+faster (it processed 100% of 1.54M with headroom). A real NIC-bound PMD would reach many
+Mpps — but this VM's only NIC is its management NIC (no SR-IOV/VF), so that ceiling can't
+be measured on this host.
+
+**3. It is genuinely lossless in the datapath.** Up to the RX ceiling,
+`matched == encap_success == eth_tx_sent == pcap-records` exactly, and
+`rx_missed`/`rx_nombuf`/`rx_errors` stay 0. The *only* loss is at the kernel-socket RX
+boundary when the feed exceeds ~1.54M.
+
+**4. Metrics flush every ~10s — measure deltas, not a short `rate()`.** The control core
+`sleep(1)`s and emits at `stat_wait>=10`. Port counters are emitted as **deltas**
+(exporter accumulates); core counters as **reset-deltas** (read + zero each flush). A
+Prometheus `rate()[15s]` sampled mid-burst can read 0. To measure: read the exporter
+(`:9102/metrics`) cumulative counters **before/after a burst that spans a flush**, or
+count **pcap records** (`blast/pcapcount.py`) — the pcap is written per-packet, so it's
+exact and latency-free.
+
+**5. The bind rule is TCP (proto 6) — sending UDP is a trap.** The loaded classifier is
+`10.0.0.1:[80-80] (proto: 6)`. UDP packets to :80 classify as **unclassified → KNI →
+drop** (they hit `..._core_packets_kni_total`, not `..._matched_total`), which *looks*
+like "the pipeline stalled" but isn't. Send **TCP**. (The `no v6 classifier loaded,
+dropping packets` line in `director.log` is unrelated — background IPv6/NDP on the veth.)
+
+**6. The single veth caps the *feed*, not the director.** 12 sender cores on one veth
+contend on its TX qdisc (each drops from 790k to ~90k), so aggregate peaks at ~1.6M pps
+(4 cores) then falls. That's why one 64-core host (director uses 3 cores) is enough to be
+both client and server — a second host isn't needed just to reach the director's ceiling.
 
 ## Watch a failover
 
