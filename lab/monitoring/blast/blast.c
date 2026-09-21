@@ -1,10 +1,16 @@
-/* blast.c — high-rate frame generator via AF_PACKET on a veth peer.
- * Sends UDP 10.11.12.13:45678 -> 10.0.0.1:80 (the GLB VIP) with a valid
- * IPv4 header checksum, so the director (eth_pcap0 rx_iface=glbt_dpdk)
- * captures + classifies + encapsulates it. Run flat-out (unthrottled) to
- * find the sender ceiling; pin to one core via arg 3.
+/* blast.c — high-rate frame generator via AF_PACKET.
+ * Sends TCP 10.11.12.13:45678 -> 10.0.0.1:80 (the GLB VIP) as a fully-formed
+ * single-IP Ethernet frame with a valid IPv4 checksum, so the director
+ * (eth_pcap0 rx_iface=glbt_dpdk) captures + classifies + encapsulates it.
+ * AF_PACKET sends the exact bytes (no kernel IP layer) — use this, not SOCK_RAW,
+ * for the cross-host test (SOCK_RAW egress got IP-in-IP wrapped on 406x).
  *
- * usage: blast <ifname> <seconds> <cpu> <udp_payload_bytes>
+ * DSTMAC / SRCMAC (env) override the link-layer MACs (default glbt_dpdk / a
+ * locally-admin MAC); set them to the real NIC MACs when blasting over a
+ * network to another host. Run flat-out (unthrottled) to find the ceiling;
+ * pin to one core via arg 3.
+ *
+ * usage: blast <ifname> <seconds> <cpu> <tcp_payload_bytes>
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -26,6 +32,18 @@ static unsigned short csum(const unsigned char *b, int n) {
     if (n & 1) s += (unsigned)b[n - 1] << 8;
     while (s >> 16) s = (s & 0xffff) + (s >> 16);
     return (unsigned short)(~s & 0xffff);
+}
+
+/* parse "aa:bb:cc:dd:ee:ff" (or "aabbccddeeff") into out[6]; 0 on success */
+static int parse_mac(const char *s, unsigned char *out) {
+    unsigned a, b, c, d, e, f;
+    if (sscanf(s, "%x:%x:%x:%x:%x:%x", &a, &b, &c, &d, &e, &f) == 6) {
+        out[0]=a; out[1]=b; out[2]=c; out[3]=d; out[4]=e; out[5]=f; return 0;
+    }
+    if (sscanf(s, "%2x%2x%2x%2x%2x%2x", &a, &b, &c, &d, &e, &f) == 6) {
+        out[0]=a; out[1]=b; out[2]=c; out[3]=d; out[4]=e; out[5]=f; return 0;
+    }
+    return -1;
 }
 
 int main(int argc, char **argv) {
@@ -50,7 +68,8 @@ int main(int argc, char **argv) {
     struct sockaddr_ll ll; memset(&ll, 0, sizeof ll);
     ll.sll_family = AF_PACKET; ll.sll_protocol = htons(ETH_P_IP);
     ll.sll_ifindex = ifi; ll.sll_halen = 6;
-    unsigned char dmac[6] = {0x4a,0x16,0x02,0xaf,0x03,0xc6}; /* glbt_dpdk */
+    unsigned char dmac[6] = {0x4a,0x16,0x02,0xaf,0x03,0xc6}; /* default: glbt_dpdk */
+    if (getenv("DSTMAC") && parse_mac(getenv("DSTMAC"), dmac) < 0) { fprintf(stderr, "bad DSTMAC\n"); return 1; }
     memcpy(ll.sll_addr, dmac, 6);
 
     int ethlen = 14, iplen = 20, tcplen = 20;
@@ -58,6 +77,7 @@ int main(int argc, char **argv) {
     unsigned char *f = malloc(tot); memset(f, 0, tot);
     memcpy(f, dmac, 6);
     unsigned char smac[6] = {0x02,0x00,0x00,0x00,0x00,0x01};
+    if (getenv("SRCMAC") && parse_mac(getenv("SRCMAC"), smac) < 0) { fprintf(stderr, "bad SRCMAC\n"); return 1; }
     memcpy(f + 6, smac, 6);
     f[12] = 0x08; f[13] = 0x00;
     unsigned char *ip = f + ethlen;

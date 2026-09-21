@@ -62,15 +62,23 @@ Then open **http://localhost:3002** → dashboard **"GLB Director - datapath & f
 
 ## Throughput: measured ceiling & what to understand
 
-The scapy sender caps at ~300 pps, so it can't stress the datapath. A fast raw-socket
-C sender does. Two are in [`blast/`](blast/):
+The scapy sender caps at ~300 pps, so it can't stress the datapath. A fast `AF_PACKET`
+C sender does. It's [`blast/blast.c`](blast/blast.c) — `gcc -O2 -o blast blast.c` — and
+it sends a fully-formed single-IP **TCP** frame (the exact bytes; no kernel IP layer).
+Use it two ways:
 
-- **`blast.c`** — `AF_PACKET` on the veth peer `glbt_py`; feeds the director's
-  `glbt_dpdk` RX directly and **isolates the director** from any transport.
-  `gcc -O2 -o blast blast.c && sudo ./blast glbt_py <secs> <cpu>`.
-- **`blast_route.c`** — `SOCK_RAW` to `10.0.0.1:80`; runs on a **second host** and
-  pushes over the real network (needs a `10.0.0.1/32 via <director-host>` route on the
-  client). Used for the cross-host end-to-end test.
+- **local** (isolate the director): feed the veth peer directly —
+  `sudo ./blast glbt_py <secs> <cpu>`.
+- **cross-host** (real network, second host): set `DSTMAC`/`SRCMAC` (env) to the real
+  NIC MACs and blast the NIC —
+  `DSTMAC=<peer-mac> SRCMAC=<this-mac> sudo ./blast <nic> <secs> <cpu>`.
+
+> **Do not use a `SOCK_RAW` sender for the cross-host test.** On this Proxmox path
+> raw-socket egress arrives **IP-in-IP wrapped** (an extra outer IP header, proto still
+> TCP), so the single-IP classifier misreads the L4 port (it sees the inner IP's length
+> field as the dport) → unclassified → KNI → drop. `AF_PACKET` sends your exact bytes,
+> so the frames arrive clean and classify normally. (Normal non-raw traffic — e.g. ping
+> — is not wrapped; it's specific to raw-socket egress on this path.)
 
 ### Measured (director in pcap-dumper mode, 100-byte TCP packets)
 
@@ -82,6 +90,29 @@ C sender does. Two are in [`blast/`](blast/):
 
 **End-to-end datapath ceiling ≈ 1.54M pps (~1.16 Gbps @ 100B)**, with **zero loss in
 classify/encap/TX** (`matched == encap == pcap-records`, exact).
+
+### Cross-host end-to-end (406x → 405x over the real Proxmox network)
+
+405x and 406x are VMs on **different Proxmox hosts**, on the same data-VLAN (L2-adjacent,
+~0.26ms RTT). Feed 406x's `blast` (AF_PACKET, `DSTMAC`=405x's NIC MAC) out `ens18`, and
+redirect the flow into the director on 405x with a `tc` ingress rule
+(`ip dst 10.0.0.1 → mirred redirect glbt_py`). This is a true end-to-end path
+(406x virtio → host bridge → switch → 405x virtio → tc → director), measured with the
+three latency-free counters (406x `sent`, 405x `/sys/.../rx_packets`, 405x pcap records):
+
+| sender cores | 406x sent | arrived | encap (pcap) | loss (network / encap) |
+|--------------|-----------|---------|--------------|------------------------|
+| 1            | 102k pps  | 102k    | 102k         | 0% / 0%                |
+| 4            | 272k pps  | 272k    | 272k         | 0% / 0%                |
+| 8            | 274k pps  | 274k    | 274k         | 0% / 0%                |
+
+**The cross-host path is 100% lossless** (network delivery 0%, director encap 0%), but
+the **aggregate plateaus at ~274k pps (~219 Mbps @ 100B)**: that's the **406x virtio NIC
+TX ceiling** (shared virtio TX ring — per-core falls 102k → 68k → 34k as cores are added
+while aggregate stays ~274k). It's far below the director's ~1.54M pps RX ceiling, so in
+the cross-host path **the director is not the bottleneck — the sender's virtio TX is**.
+To push the director higher over the network you need a faster sender (bigger virtio ring,
+more parallelism, or a real NIC on 406x).
 
 ### What matters (the non-obvious parts)
 
